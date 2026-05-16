@@ -1,29 +1,12 @@
-import pymongo
 from pymongo import MongoClient, ASCENDING
-from pymongo.errors import CollectionInvalid
-from bson.binary import Binary
-import redis
-import json
-import uuid
-from datetime import timedelta
-from typing import Optional
 
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
-import uvicorn
-import os
-
-# ---------- ЧАСТЬ 1-2: Catalog и выборки ----------
 def setup_catalog_and_queries():
     client = MongoClient('localhost', 27017)
     db = client['Catalog']
-    # Очистим и создадим коллекцию
     db.drop_collection('PC_components')
     comps = db['PC_components']
 
-    # Документы по категориям (по 6+ на тип)
     components = [
-        # материнские платы
         {"Production": "MSI", "Model": "B450 TOMAHAWK", "Price": 120,
          "Category": {"Type": "материнская плата", "Description": "AM4, ATX", "format": "ATX", "socket": "AM4"}},
         {"Production": "ASUS", "Model": "ROG STRIX B550-F", "Price": 180,
@@ -39,7 +22,6 @@ def setup_catalog_and_queries():
         {"Production": "ASUS", "Model": "TUF GAMING B660M-PLUS", "Price": 150,
          "Category": {"Type": "материнская плата", "Description": "LGA1700, mATX", "format": "mATX", "socket": "LGA1700"}},
 
-        # процессоры
         {"Production": "AMD", "Model": "Ryzen 5 5600X", "Price": 200,
          "Category": {"Type": "процессор", "Description": "AM4, 3.7 GHz", "socket": "AM4", "frequency": 3.7}},
         {"Production": "AMD", "Model": "Ryzen 7 5800X", "Price": 350,
@@ -55,7 +37,6 @@ def setup_catalog_and_queries():
         {"Production": "Intel", "Model": "Core i9-12900K", "Price": 550,
          "Category": {"Type": "процессор", "Description": "LGA1700, 3.2 GHz", "socket": "LGA1700", "frequency": 3.2}},
 
-        # ОЗУ
         {"Production": "Corsair", "Model": "Vengeance LPX 16GB", "Price": 70,
          "Category": {"Type": "ОЗУ", "Description": "DDR4 3200 MHz", "frequency": 3200, "capacity": 16}},
         {"Production": "Kingston", "Model": "FURY Beast 8GB", "Price": 40,
@@ -69,7 +50,6 @@ def setup_catalog_and_queries():
         {"Production": "Samsung", "Model": "DDR5 4800 32GB", "Price": 200,
          "Category": {"Type": "ОЗУ", "Description": "DDR5 4800 MHz", "frequency": 4800, "capacity": 32}},
 
-        # ПЗУ
         {"Production": "Samsung", "Model": "870 EVO 1TB", "Price": 100,
          "Category": {"Type": "ПЗУ", "Description": "SATA SSD 2.5\"", "form_factor": "2.5\"", "capacity": 1024}},
         {"Production": "WD", "Model": "Black SN850 1TB", "Price": 140,
@@ -83,7 +63,6 @@ def setup_catalog_and_queries():
         {"Production": "Kingston", "Model": "A400 240GB", "Price": 25,
          "Category": {"Type": "ПЗУ", "Description": "SATA SSD 2.5\"", "form_factor": "2.5\"", "capacity": 240}},
 
-        # видеокарты
         {"Production": "NVIDIA", "Model": "RTX 3060", "Price": 350,
          "Category": {"Type": "видеокарта", "Description": "12GB GDDR6", "memory": 12, "ports": ["HDMI", "3xDP"]}},
         {"Production": "NVIDIA", "Model": "RTX 3070", "Price": 550,
@@ -100,9 +79,6 @@ def setup_catalog_and_queries():
     comps.insert_many(components)
     print("Коллекция PC_components заполнена.")
 
-    # --- Выборки ---
-
-    # 2.1 Самая дешёвая и самая дорогая сборки (по сокету)
     sockets = comps.distinct("Category.socket", {"Category.Type": "материнская плата"})
     min_ram = comps.find_one({"Category.Type": "ОЗУ"}, sort=[("Price", 1)])
     max_ram = comps.find_one({"Category.Type": "ОЗУ"}, sort=[("Price", -1)])
@@ -135,15 +111,14 @@ def setup_catalog_and_queries():
                 "total": exp_mb["Price"] + exp_cpu["Price"] + max_ram["Price"] + max_storage["Price"] + max_gpu["Price"]
             })
 
-    print("\n=== Самая дешёвая сборка (по сокетам) ===")
+    print("\nСамая дешёвая сборка")
     for b in cheap_builds:
         print(b)
-    print("\n=== Самая дорогая сборка (по сокетам) ===")
+    print("\nСамая дорогая сборка (по сокетам)")
     for b in expensive_builds:
         print(b)
 
-    # 2.2 Третий и пятый по стоимости в каждой категории
-    print("\n=== 3-й и 5-й по стоимости ===")
+    print("\n3-й и 5-й по стоимости")
     for cat_type in ["материнская плата", "процессор", "ОЗУ", "ПЗУ", "видеокарта"]:
         items = list(comps.find({"Category.Type": cat_type}).sort("Price", ASCENDING))
         if len(items) >= 5:
@@ -152,7 +127,6 @@ def setup_catalog_and_queries():
         else:
             print(f"{cat_type}: недостаточно элементов (всего {len(items)})")
 
-    # 2.3 Все сборки на сокете AM4
     am4_mb = list(comps.find({"Category.Type": "материнская плата", "Category.socket": "AM4"}))
     am4_cpu = list(comps.find({"Category.Type": "процессор", "Category.socket": "AM4"}))
     rams = list(comps.find({"Category.Type": "ОЗУ"}))
@@ -170,93 +144,11 @@ def setup_catalog_and_queries():
                             "ram": ram["Model"], "storage": st["Model"], "gpu": gpu["Model"],
                             "total": mb["Price"] + cpu["Price"] + ram["Price"] + st["Price"] + gpu["Price"]
                         })
-    print(f"\n=== Всего AM4-сборок: {len(am4_builds)} ===")
+    print(f"\nВсего AM4-сборок: {len(am4_builds)}")
     for i, b in enumerate(am4_builds[:5], 1):
         print(f"{i}: {b}")
 
     client.close()
 
-# ---------- ЧАСТЬ 3: AVATARS (MongoDB) ----------
-class AvatarStorage:
-    def __init__(self, uri='localhost:27017'):
-        self.client = MongoClient(uri)
-        self.db = self.client['AVATARS']
-        self.col = self.db['avatars']
-
-    def save_avatar(self, user_id: str, file_path: str):
-        with open(file_path, 'rb') as f:
-            data = f.read()
-        self.col.update_one(
-            {'user_id': user_id},
-            {'$set': {'avatar': Binary(data)}},
-            upsert=True
-        )
-        print(f"Аватар пользователя {user_id} сохранён.")
-
-    def get_avatar(self, user_id: str) -> Optional[bytes]:
-        doc = self.col.find_one({'user_id': user_id})
-        return doc['avatar'] if doc else None
-
-# ---------- ЧАСТЬ 4: Redis + FastAPI ----------
-# Инициализация Redis
-redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
-
-app = FastAPI()
-
-# Middleware для сессий (сохраняет session_id в Redis)
-@app.middleware("http")
-async def session_middleware(request: Request, call_next):
-    session_id = request.cookies.get('session_id')
-    if not session_id:
-        session_id = str(uuid.uuid4())
-    # Обновляем TTL 30 минут
-    redis_client.setex(f"session:{session_id}", timedelta(minutes=30), json.dumps({"active": True}))
-    request.state.session_id = session_id
-    response = await call_next(request)
-    if not request.cookies.get('session_id'):
-        response.set_cookie(key='session_id', value=session_id, httponly=True)
-    return response
-
-# Заглушка "каталога" из MongoDB (имитация долгого запроса)
-def get_catalog_data():
-    client = MongoClient('localhost', 27017)
-    comps = client['Catalog']['PC_components']
-    data = list(comps.find({}, {'_id': 0}))  # преобразуем в список словарей
-    client.close()
-    return data
-
-@app.get("/catalog")
-async def catalog(request: Request):
-    # Проверяем кэш Redis
-    cached = redis_client.get("catalog_cache")
-    if cached:
-        return JSONResponse(content=json.loads(cached))
-    # Если нет – берём из MongoDB, кладём в кэш на 5 минут
-    data = get_catalog_data()
-    redis_client.setex("catalog_cache", timedelta(minutes=5), json.dumps(data))
-    return JSONResponse(content=data)
-
-@app.get("/session-info")
-async def session_info(request: Request):
-    sid = request.state.session_id
-    session_data = redis_client.get(f"session:{sid}")
-    return {"session_id": sid, "data": json.loads(session_data) if session_data else None}
-
-# Точка входа
 if __name__ == "__main__":
-    # Выполняем задания MongoDB
-    print("=== Задания 1-2: Catalog ===")
     setup_catalog_and_queries()
-
-    print("\n=== Задание 3: AVATARS ===")
-    av = AvatarStorage()
-    # Демонстрация: если есть файл avatar.png, сохраняем/читаем
-    if os.path.exists("avatar.png"):
-        av.save_avatar("user1", "avatar.png")
-        img = av.get_avatar("user1")
-        print(f"Прочитан аватар, размер: {len(img)} байт")
-    else:
-        print("Файл avatar.png не найден — пропуск.")
-
-    print("\n=== Задание 4: Запуск веб-сервера с Redis ===")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
